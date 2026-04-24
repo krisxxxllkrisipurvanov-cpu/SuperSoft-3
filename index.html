@@ -57,12 +57,39 @@
         .win-btn { width:46px; height:100%; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.1s; color:#444; touch-action:manipulation; }
         .win-btn:hover { background:#e0e0e0; }
         .win-btn.close-btn:hover { background:#e04343; color:#fff; }
-        .window-body { flex:1; overflow:auto; background:#fafafa; }
+        .window-body { flex:1; overflow:auto; background:#fafafa; position: relative; }
         #errorOverlay, #updateOverlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:5000; display:none; align-items:center; justify-content:center; }
         #errorOverlay.show, #updateOverlay.show { display:flex; }
         .update-dialog { background:#fff; padding:28px; text-align:center; width:400px; }
         .progress-bar { height:12px; background:#eee; width:100%; margin:15px 0; }
         .progress-fill { height:100%; background:var(--accent); width:0%; }
+
+        /* Browser specific */
+        .browser-loading {
+            position: absolute; top:0; left:0; right:0; bottom:0;
+            background: white; display: flex; flex-direction: column;
+            align-items: center; justify-content: center;
+            z-index: 20;
+        }
+        .browser-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid var(--accent);
+            border-radius: 50%;
+            width: 40px; height: 40px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 15px;
+        }
+        @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+        .browser-toolbar {
+            display: flex; align-items: center; padding: 6px;
+            background: #f0f0f0; border-bottom: 1px solid #ccc; gap: 8px;
+        }
+        .browser-url { flex:1; padding:6px 10px; border:1px solid #aaa; border-radius:14px; font-size:13px; outline:none; }
+        .browser-go { padding:6px 14px; background:var(--accent); color:#fff; border:none; border-radius:4px; cursor:pointer; font-weight:500; }
+        .browser-go:hover { background:var(--accent-hover); }
+        .browser-iframe { width:100%; height:calc(100% - 44px); border:none; background:#fff; }
+
+        /* Other app styles */
         .snake-container { display:flex; flex-direction:column; align-items:center; background:#12122a; height:100%; justify-content:center; }
         .memory-container { display:flex; flex-direction:column; align-items:center; padding:14px; background:#f5f5f0; }
         .memory-grid { display:grid; grid-template-columns:repeat(4,68px); gap:7px; margin:10px 0; }
@@ -102,7 +129,7 @@
     <div class="menu-item" onclick="openWindow('thispc');toggleStartMenu();">💻 This PC</div>
     <div class="menu-item" onclick="openWindow('documents');toggleStartMenu();">📄 Documents</div>
     <div class="menu-item" onclick="openWindow('games');toggleStartMenu();">🎮 Games</div>
-    <div class="menu-item" onclick="openWindow('browser');toggleStartMenu();">🌐 Browser</div>
+    <div class="menu-item" onclick="openNewBrowser();toggleStartMenu();">🌐 Browser</div>
     <div class="menu-item" onclick="openWindow('settings');toggleStartMenu();">⚙️ Settings</div>
     <div class="menu-item" onclick="openWindow('paint');toggleStartMenu();">🎨 Paint</div>
 </div>
@@ -150,14 +177,15 @@
 
     let windowZIndex = 10;
     const openWindows = {};
+    const browserLoadingTimeouts = {}; // track loading timers per browser window
     let selectedIcon = null;
     let bootComplete = false;
     let errorTimer = null;
     let errorVisible = false;
     let updateActive = false;
     let snakeInterval = null;
+    let browserCounter = 0;
 
-    // Default desktop icons (system)
     const defaultIcons = [
         { id: 'thispc', name: 'This PC', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="6" y="6" width="52" height="34" rx="3" fill="#e8ecf1" stroke="#8899aa" stroke-width="2.5"/><rect x="10" y="10" width="44" height="26" rx="1" fill="#4a90d9"/><rect x="20" y="42" width="24" height="4" rx="2" fill="#6b7d8e"/></svg>', isSystem: true },
         { id: 'documents', name: 'Documents', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="10" y="6" width="44" height="52" rx="3" fill="#f5f5f0" stroke="#b0b0a8" stroke-width="2.5"/><rect x="16" y="14" width="32" height="4" fill="#c0c0b8"/></svg>', isSystem: true },
@@ -170,26 +198,19 @@
         return '<svg class="icon-svg" viewBox="0 0 64 64"><path d="M8 12 L20 12 L24 8 L40 8 L40 40 L8 40 Z" fill="#f5c842" stroke="#d4a820" stroke-width="2.5"/></svg>';
     }
 
-    // Load / Save desktop state
     function loadDesktopState() {
         const saved = localStorage.getItem('superSoft3_icons');
         let icons;
         if (saved) {
-            try {
-                icons = JSON.parse(saved);
-            } catch(e) { icons = null; }
+            try { icons = JSON.parse(saved); } catch(e) { icons = null; }
         }
         if (!icons || !Array.isArray(icons) || icons.length === 0) {
             icons = defaultIcons.map(i => ({...i}));
         }
-        // Ensure all system icons exist
         defaultIcons.forEach(def => {
-            if (!icons.find(i => i.id === def.id)) {
-                icons.push({...def});
-            }
+            if (!icons.find(i => i.id === def.id)) icons.push({...def});
         });
         renderIcons(icons);
-        // Background
         const bg = localStorage.getItem('superSoft3_bg');
         if (bg) desktop.style.background = bg;
         else desktop.style.background = 'radial-gradient(circle at 30% 20%, #1f5870, #0a2a3a)';
@@ -198,10 +219,11 @@
     function saveDesktopState() {
         const icons = [];
         document.querySelectorAll('#desktopIcons .desktop-icon').forEach(el => {
-            const id = el.dataset.app;
-            const name = el.querySelector('.icon-label').textContent;
-            const isSystem = defaultIcons.some(d => d.id === id);
-            icons.push({ id, name, isSystem });
+            icons.push({
+                id: el.dataset.app,
+                name: el.querySelector('.icon-label').textContent,
+                isSystem: defaultIcons.some(d => d.id === el.dataset.app)
+            });
         });
         localStorage.setItem('superSoft3_icons', JSON.stringify(icons));
         localStorage.setItem('superSoft3_bg', desktop.style.background);
@@ -220,7 +242,7 @@
                 else if (icon.id === 'documents') openWindow('documents');
                 else if (icon.id === 'recyclebin') openWindow('recyclebin');
                 else if (icon.id === 'games') openWindow('games');
-                else if (icon.id === 'browser') openWindow('browser');
+                else if (icon.id === 'browser') openNewBrowser();
                 else alert('Folder opened (simulation)');
             });
             el.addEventListener('click', () => selectIcon(el));
@@ -230,11 +252,10 @@
 
     function createNewFolder() {
         const id = 'newfolder_' + Date.now();
-        const name = 'New Folder';
         const el = document.createElement('div');
         el.className = 'desktop-icon';
         el.setAttribute('data-app', id);
-        el.innerHTML = getDefaultFolderSvg() + `<span class="icon-label">${name}</span>`;
+        el.innerHTML = getDefaultFolderSvg() + '<span class="icon-label">New Folder</span>';
         el.addEventListener('dblclick', () => alert('Folder opened (simulation)'));
         el.addEventListener('click', () => selectIcon(el));
         desktopIcons.appendChild(el);
@@ -251,8 +272,7 @@
     }
 
     function deleteIcon(iconEl) {
-        const id = iconEl.dataset.app;
-        if (defaultIcons.some(d => d.id === id)) {
+        if (defaultIcons.some(d => d.id === iconEl.dataset.app)) {
             alert("System icons cannot be deleted.");
             return;
         }
@@ -263,7 +283,6 @@
         }
     }
 
-    // Boot sequence
     function finishBoot() {
         if(bootComplete) return;
         bootComplete = true;
@@ -300,7 +319,6 @@
 
     function updateClock() { clockTime.textContent = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' }); }
 
-    // Start menu & context menu
     window.toggleStartMenu = () => startMenu.classList.toggle('open');
     document.addEventListener('click', (e) => {
         if(startMenu.classList.contains('open') && !startMenu.contains(e.target) && e.target.id!=='startBtn')
@@ -365,7 +383,7 @@
         if(e.target===desktop) { if(selectedIcon) { selectedIcon.classList.remove('selected'); selectedIcon = null; } }
     });
 
-    // Window management (with pointer events dragging)
+    // ----- WINDOW MANAGEMENT -----
     function createWindowElement(id, title, width, height) {
         const win = document.createElement('div');
         win.className = 'window'; win.id = 'window-'+id;
@@ -451,11 +469,17 @@
     }
     function closeWindow(id) {
         const w = openWindows[id]; if(!w) return;
-        if(id==='snake' && snakeInterval) { clearInterval(snakeInterval); snakeInterval = null; }
+        if(id.startsWith('snake') && snakeInterval) { clearInterval(snakeInterval); snakeInterval = null; }
+        // Clear browser loading timeout if any
+        if (browserLoadingTimeouts[id]) {
+            clearTimeout(browserLoadingTimeouts[id]);
+            delete browserLoadingTimeouts[id];
+        }
         w.element.style.transition = 'opacity 0.15s'; w.element.style.opacity = '0';
         setTimeout(() => { w.taskbarBtn?.remove(); w.element.remove(); delete openWindows[id]; }, 150);
     }
 
+    // ----- OPEN APPS -----
     window.openWindow = function(app) {
         if(openWindows[app]) { if(openWindows[app].minimized) restoreWindow(app); bringToFront(app); return; }
         let title,w,h,bodyFn;
@@ -464,7 +488,6 @@
             case 'documents': title='Documents'; w=650; h=400; bodyFn=()=>createFolderContent([{name:'Report.docx',icon:'file'},{name:'Notes.txt',icon:'file',action:()=>openWindow('notepad')}]); break;
             case 'recyclebin': title='Recycle Bin'; w=550; h=350; bodyFn=()=>{ const d=document.createElement('div'); d.style.cssText='display:flex;align-items:center;justify-content:center;flex-direction:column;height:100%;color:#888;'; d.innerHTML='<svg width="48" height="48"><rect x="14" y="28" width="36" height="26" rx="3" fill="#ddd"/></svg><span>Recycle Bin is empty.</span>'; return d; }; break;
             case 'games': title='Games'; w=500; h=350; bodyFn=()=>createFolderContent([{name:'Snake',icon:'snake',action:()=>openWindow('snake')},{name:'Memory',icon:'memory',action:()=>openWindow('memory')}]); break;
-            case 'browser': title='SuperSoft Browser'; w=800; h=480; bodyFn=()=>{ const d=document.createElement('div'); d.style.cssText='display:flex;flex-direction:column;height:100%;'; d.innerHTML='<div style="background:#f0f0f0;padding:8px;"><input style="width:100%;padding:6px;" value="https://krisxxxllkrisipurvanov-cpu.github.io/Windows-Server-2026/" readonly></div><div style="flex:1;display:flex;align-items:center;justify-content:center;">Welcome</div>'; return d; }; break;
             case 'notepad': title='Notepad'; w=500; h=380; bodyFn=()=>{ const ta=document.createElement('textarea'); ta.className='notepad-area'; ta.value='SuperSoft3 Notepad'; return ta; }; break;
             case 'snake': title='Snake'; w=440; h=500; bodyFn=()=>createSnakeGame(); break;
             case 'memory': title='Memory Match'; w=460; h=430; bodyFn=()=>createMemoryGame(); break;
@@ -475,7 +498,76 @@
         document.getElementById('window-body-'+app).appendChild(bodyFn());
     };
 
-    // Folder content helper
+    // ----- BROWSER WITH LOADING ANIMATION -----
+    function openNewBrowser() {
+        browserCounter++;
+        const id = 'browser' + browserCounter;
+        const title = 'SuperSoft Browser';
+        const width = 800, height = 500;
+        const win = createWindowElement(id, title, width, height);
+        const body = document.getElementById('window-body-'+id);
+        body.style.overflow = 'hidden';
+
+        // Create loading overlay
+        const loadingDiv = document.createElement('div');
+        loadingDiv.className = 'browser-loading';
+        loadingDiv.innerHTML = `
+            <div class="browser-spinner"></div>
+            <div style="color:#555; font-size:14px;">Loading browser...</div>
+        `;
+        body.appendChild(loadingDiv);
+
+        // Create toolbar and iframe (hidden initially)
+        const toolbar = document.createElement('div');
+        toolbar.className = 'browser-toolbar';
+        toolbar.style.display = 'none';
+        const urlInput = document.createElement('input');
+        urlInput.className = 'browser-url';
+        urlInput.value = 'https://wikipedia.org';
+        const goBtn = document.createElement('button');
+        goBtn.className = 'browser-go';
+        goBtn.textContent = 'Go';
+        toolbar.appendChild(urlInput);
+        toolbar.appendChild(goBtn);
+
+        const iframe = document.createElement('iframe');
+        iframe.className = 'browser-iframe';
+        iframe.src = 'https://wikipedia.org';
+        iframe.sandbox = 'allow-same-origin allow-scripts allow-popups allow-forms allow-top-navigation';
+        iframe.style.display = 'none';
+        body.appendChild(toolbar);
+        body.appendChild(iframe);
+
+        function navigate() {
+            let url = urlInput.value.trim();
+            if (!url) return;
+            if (!url.startsWith('http://') && !url.startsWith('https://')) {
+                url = 'https://' + url;
+            }
+            iframe.src = url;
+            urlInput.value = url;
+        }
+        goBtn.addEventListener('click', navigate);
+        urlInput.addEventListener('keydown', (e) => { if (e.key === 'Enter') navigate(); });
+        iframe.addEventListener('load', () => {
+            try {
+                const actualUrl = iframe.contentWindow.location.href;
+                if (actualUrl && actualUrl !== 'about:blank') urlInput.value = actualUrl;
+            } catch(e) { /* cross-origin */ }
+        });
+
+        // Set timeout to replace loading with browser after 10-20 seconds
+        const loadDelay = 10000 + Math.random() * 10000; // 10-20 seconds
+        const timerId = setTimeout(() => {
+            if (loadingDiv.parentNode) loadingDiv.remove();
+            toolbar.style.display = 'flex';
+            iframe.style.display = 'block';
+            delete browserLoadingTimeouts[id];
+        }, loadDelay);
+        browserLoadingTimeouts[id] = timerId;
+    }
+
+    // Helper functions
     function createFolderContent(items) {
         const c = document.createElement('div'); c.className='folder-content';
         items.forEach(it=>{
@@ -570,6 +662,8 @@
     window.dismissError = () => { errorOverlay.classList.remove('show'); errorVisible=false; scheduleErrorPopup(); };
     window.startUpdate = () => { errorOverlay.classList.remove('show'); errorVisible=false; if(errorTimer)clearTimeout(errorTimer); updateActive=true; updateOverlay.classList.add('show'); updateProgressFill.style.width='0%'; updatePercent.textContent='0%'; const duration=10000+Math.random()*10000; const start=Date.now(); function tick(){ const prog=Math.min(100,Math.round(((Date.now()-start)/duration)*100)); updateProgressFill.style.width=prog+'%'; updatePercent.textContent=prog+'%'; if(prog<100) requestAnimationFrame(()=>setTimeout(tick,200)); else setTimeout(()=>{ window.location.href='https://krisxxxllkrisipurvanov-cpu.github.io/Windows-Server-2026/'; },500); } tick(); };
     errorOverlay.addEventListener('click', e => { if(e.target===errorOverlay) dismissError(); });
+
+    window.openNewBrowser = openNewBrowser;
 })();
 </script>
 </body>
