@@ -1,0 +1,576 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>SuperSoft3</title>
+    <style>
+        :root {
+            --taskbar-height: 44px;
+            --taskbar-bg: #1a2a3a;
+            --accent: #0078d7;
+            --accent-hover: #1a8ae8;
+            --win-border: #c0c0c0;
+        }
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body {
+            font-family:'Segoe UI', 'Helvetica Neue', Arial, sans-serif;
+            overflow:hidden; height:100vh; width:100vw;
+            background:#0a1620; user-select:none; -webkit-user-select:none;
+        }
+        #bootScreen { position:fixed; inset:0; z-index:99999; background:#000; display:flex; align-items:center; justify-content:center; transition:opacity 0.7s; pointer-events:all; }
+        #bootScreen.fading { opacity:0; pointer-events:none; }
+        #bootScreen.hidden { display:none; }
+        #bootImage { width:100%; height:100%; object-fit:cover; display:none; }
+        #bootFallback { display:none; width:100%; height:100%; background:linear-gradient(135deg, #0a1628, #0d2847); flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; }
+        #bootFallback .logo-text { font-size:clamp(2.5rem,6vw,5rem); font-weight:700; background:linear-gradient(180deg,#fff,#8ecae6); -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+        #bootFallback .logo-sub { font-size:1.1rem; letter-spacing:6px; color:#7ab8d4; margin-top:10px; }
+        #desktop { position:fixed; top:0; left:0; width:100vw; height:calc(100vh - var(--taskbar-height)); z-index:1; overflow:hidden; }
+        #desktopIcons { position:absolute; top:18px; left:16px; display:flex; flex-direction:column; gap:6px; z-index:2; }
+        .desktop-icon { display:flex; flex-direction:column; align-items:center; width:82px; padding:10px 6px 8px; border-radius:4px; cursor:pointer; transition:background 0.12s; text-align:center; }
+        .desktop-icon:hover { background:rgba(255,255,255,0.12); }
+        .desktop-icon.selected { background:rgba(255,255,255,0.22); outline:1.5px solid rgba(255,255,255,0.6); outline-offset:-1px; }
+        .desktop-icon .icon-svg { width:48px; height:48px; margin-bottom:4px; filter:drop-shadow(0 2px 4px rgba(0,0,0,0.4)); }
+        .desktop-icon .icon-label { color:#fff; font-size:12px; text-shadow:0 1px 3px rgba(0,0,0,0.7); word-wrap:break-word; max-width:78px; }
+        #taskbar { position:fixed; bottom:0; left:0; width:100vw; height:var(--taskbar-height); background:var(--taskbar-bg); z-index:1000; display:flex; align-items:center; border-top:1px solid rgba(255,255,255,0.08); box-shadow:0 -2px 10px rgba(0,0,0,0.5); }
+        #startBtn { width:46px; height:100%; background:transparent; border:none; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.15s; flex-shrink:0; }
+        #startBtn:hover { background:rgba(255,255,255,0.1); }
+        .taskbar-window-btn { height:34px; padding:0 14px; background:rgba(255,255,255,0.06); border:1px solid rgba(255,255,255,0.12); color:#ddd; font-size:12px; cursor:pointer; border-radius:2px; white-space:nowrap; max-width:160px; overflow:hidden; text-overflow:ellipsis; transition:all 0.12s; margin-left:2px; }
+        .taskbar-window-btn.active { background:rgba(255,255,255,0.18); border-color:rgba(255,255,255,0.25); color:#fff; }
+        #systemTray { display:flex; align-items:center; gap:10px; padding:0 14px; height:100%; flex-shrink:0; color:#e0e0e0; font-size:12px; margin-left:auto; }
+        .clock-time { font-weight:500; }
+        #startMenu { position:fixed; bottom:var(--taskbar-height); left:0; width:260px; background:#1e3045; border:1px solid rgba(255,255,255,0.1); z-index:999; box-shadow:0 -4px 20px rgba(0,0,0,0.5); display:none; flex-direction:column; border-radius:0 8px 0 0; }
+        #startMenu.open { display:flex; animation:slideUp 0.15s; }
+        @keyframes slideUp { from { transform:translateY(10px); opacity:0; } }
+        .menu-item { padding:12px 18px; color:#eee; font-size:13.5px; cursor:pointer; display:flex; align-items:center; gap:10px; }
+        .menu-item:hover { background:rgba(255,255,255,0.08); }
+        .menu-item svg { width:20px; height:20px; opacity:0.9; flex-shrink:0; }
+        #contextMenu { position:fixed; z-index:10000; background:#f0f0f0; border:1px solid #999; box-shadow:3px 3px 10px rgba(0,0,0,0.3); display:none; min-width:160px; padding:4px 0; }
+        .context-menu-item { padding:8px 20px; font-size:13px; color:#222; cursor:pointer; display:flex; align-items:center; gap:8px; }
+        .context-menu-item:hover { background:#d0e4f7; }
+        .context-separator { height:1px; background:#ccc; margin:4px 0; }
+        .window { position:absolute; min-width:280px; min-height:180px; background:#fff; border:1px solid var(--win-border); box-shadow:0 4px 24px rgba(0,0,0,0.3); z-index:10; display:flex; flex-direction:column; animation:windowOpen 0.2s; pointer-events:auto; }
+        .window.maximized { top:0 !important; left:0 !important; width:100vw !important; height:calc(100vh - var(--taskbar-height)) !important; }
+        .window-titlebar { display:flex; align-items:center; background:#f5f5f5; height:32px; padding-left:12px; cursor:default; border-bottom:1px solid #ddd; gap:8px; touch-action:none; }
+        .win-title-text { flex:1; font-size:12.5px; color:#222; font-weight:500; pointer-events:none; }
+        .win-controls { display:flex; height:100%; }
+        .win-btn { width:46px; height:100%; border:none; background:transparent; cursor:pointer; display:flex; align-items:center; justify-content:center; transition:background 0.1s; color:#444; touch-action:manipulation; }
+        .win-btn:hover { background:#e0e0e0; }
+        .win-btn.close-btn:hover { background:#e04343; color:#fff; }
+        .window-body { flex:1; overflow:auto; background:#fafafa; }
+        #errorOverlay, #updateOverlay { position:fixed; inset:0; background:rgba(0,0,0,0.5); z-index:5000; display:none; align-items:center; justify-content:center; }
+        #errorOverlay.show, #updateOverlay.show { display:flex; }
+        .update-dialog { background:#fff; padding:28px; text-align:center; width:400px; }
+        .progress-bar { height:12px; background:#eee; width:100%; margin:15px 0; }
+        .progress-fill { height:100%; background:var(--accent); width:0%; }
+        .snake-container { display:flex; flex-direction:column; align-items:center; background:#12122a; height:100%; justify-content:center; }
+        .memory-container { display:flex; flex-direction:column; align-items:center; padding:14px; background:#f5f5f0; }
+        .memory-grid { display:grid; grid-template-columns:repeat(4,68px); gap:7px; margin:10px 0; }
+        .memory-card { width:68px; height:68px; background:#3a5a7c; border-radius:6px; cursor:pointer; display:flex; align-items:center; justify-content:center; font-size:30px; color:transparent; transition:0.2s; }
+        .memory-card.flipped { background:#fff; color:#222; border:2px solid #aaa; }
+        .memory-card.matched { background:#c8e6c9; border-color:#81c784; pointer-events:none; }
+        .paint-canvas { width:100%; height:calc(100% - 40px); background:#fff; cursor:crosshair; }
+        .paint-toolbar { display:flex; gap:8px; padding:8px; background:#f0f0f0; align-items:center; }
+        .settings-section { padding:16px; }
+        .folder-content { display:flex; flex-wrap:wrap; gap:20px; padding:20px; }
+        .folder-item { display:flex; flex-direction:column; align-items:center; width:76px; padding:10px 4px; cursor:pointer; border-radius:4px; text-align:center; }
+        .folder-item:hover { background:rgba(0,120,215,0.08); }
+        .notepad-area { width:100%; height:100%; border:none; resize:none; padding:12px; font-family:Consolas, monospace; }
+    </style>
+</head>
+<body>
+<div id="bootScreen">
+    <img id="bootImage" src="https://raw.githubusercontent.com/krisxxxllkrisipurvanov-cpu/Images/main/SuperSoft3.png" alt="SuperSoft3 Boot" crossorigin="anonymous">
+    <div id="bootFallback"><div class="logo-text">SuperSoft3</div><div class="logo-sub">STARTING UP...</div></div>
+</div>
+
+<div id="desktop">
+    <div id="desktopIcons"></div>
+</div>
+
+<div id="contextMenu"></div>
+
+<div id="taskbar">
+    <button id="startBtn" onclick="toggleStartMenu()" title="Start">
+        <svg width="20" height="20" viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5" fill="#fff"/><rect x="13" y="3" width="8" height="8" rx="1.5" fill="#fff"/><rect x="3" y="13" width="8" height="8" rx="1.5" fill="#fff"/><rect x="13" y="13" width="8" height="8" rx="1.5" fill="#fff"/></svg>
+    </button>
+    <div id="taskbarWindows" style="display:flex; align-items:center; gap:2px; flex:1;"></div>
+    <div id="systemTray"><span id="clockTime" class="clock-time">12:00</span></div>
+</div>
+
+<div id="startMenu">
+    <div class="menu-item" onclick="openWindow('thispc');toggleStartMenu();">💻 This PC</div>
+    <div class="menu-item" onclick="openWindow('documents');toggleStartMenu();">📄 Documents</div>
+    <div class="menu-item" onclick="openWindow('games');toggleStartMenu();">🎮 Games</div>
+    <div class="menu-item" onclick="openWindow('browser');toggleStartMenu();">🌐 Browser</div>
+    <div class="menu-item" onclick="openWindow('settings');toggleStartMenu();">⚙️ Settings</div>
+    <div class="menu-item" onclick="openWindow('paint');toggleStartMenu();">🎨 Paint</div>
+</div>
+
+<div id="windowsContainer" style="position:fixed;top:0;left:0;width:100vw;height:calc(100vh - var(--taskbar-height));pointer-events:none;z-index:5;"></div>
+
+<div id="errorOverlay">
+    <div id="errorDialog" style="background:#fff;border:1px solid #c0c0c0;box-shadow:0 8px 40px rgba(0,0,0,0.5);width:440px;">
+        <div class="err-titlebar" style="background:#f5f5f5;padding:10px 14px;font-weight:600;">Windows Update Required</div>
+        <div class="err-body" style="padding:20px;display:flex;gap:14px;">
+            <svg width="36" height="36" viewBox="0 0 40 40"><circle cx="20" cy="20" r="17" stroke="#e7a817" stroke-width="3" fill="none"/><circle cx="20" cy="26" r="2" fill="#e7a817"/><rect x="18" y="10" width="4" height="10" rx="2" fill="#e7a817"/></svg>
+            <div>You need to update to <strong>Windows Server 2026</strong>.<br>Click Update to install (10-20 seconds).</div>
+        </div>
+        <div style="padding:12px 20px 16px;display:flex;gap:8px;justify-content:flex-end;">
+            <button class="err-btn" onclick="dismissError()">Close</button>
+            <button class="err-btn primary" onclick="startUpdate()" style="background:var(--accent);color:#fff;border-color:var(--accent);">Update</button>
+        </div>
+    </div>
+</div>
+
+<div id="updateOverlay">
+    <div class="update-dialog">
+        <h3>Updating to Windows Server 2026...</h3>
+        <div class="progress-bar"><div class="progress-fill" id="updateProgressFill"></div></div>
+        <div id="updatePercent">0%</div>
+    </div>
+</div>
+
+<script>
+(function() {
+    const desktop = document.getElementById('desktop');
+    const windowsContainer = document.getElementById('windowsContainer');
+    const taskbarWindows = document.getElementById('taskbarWindows');
+    const bootScreen = document.getElementById('bootScreen');
+    const bootImage = document.getElementById('bootImage');
+    const bootFallback = document.getElementById('bootFallback');
+    const errorOverlay = document.getElementById('errorOverlay');
+    const updateOverlay = document.getElementById('updateOverlay');
+    const updateProgressFill = document.getElementById('updateProgressFill');
+    const updatePercent = document.getElementById('updatePercent');
+    const startMenu = document.getElementById('startMenu');
+    const contextMenu = document.getElementById('contextMenu');
+    const clockTime = document.getElementById('clockTime');
+    const desktopIcons = document.getElementById('desktopIcons');
+
+    let windowZIndex = 10;
+    const openWindows = {};
+    let selectedIcon = null;
+    let bootComplete = false;
+    let errorTimer = null;
+    let errorVisible = false;
+    let updateActive = false;
+    let snakeInterval = null;
+
+    // Default desktop icons (system)
+    const defaultIcons = [
+        { id: 'thispc', name: 'This PC', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="6" y="6" width="52" height="34" rx="3" fill="#e8ecf1" stroke="#8899aa" stroke-width="2.5"/><rect x="10" y="10" width="44" height="26" rx="1" fill="#4a90d9"/><rect x="20" y="42" width="24" height="4" rx="2" fill="#6b7d8e"/></svg>', isSystem: true },
+        { id: 'documents', name: 'Documents', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="10" y="6" width="44" height="52" rx="3" fill="#f5f5f0" stroke="#b0b0a8" stroke-width="2.5"/><rect x="16" y="14" width="32" height="4" fill="#c0c0b8"/></svg>', isSystem: true },
+        { id: 'recyclebin', name: 'Recycle Bin', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="14" y="28" width="36" height="26" rx="3" fill="#ddd" stroke="#999" stroke-width="2.5"/><rect x="10" y="20" width="44" height="10" rx="3" fill="#bbb"/></svg>', isSystem: true },
+        { id: 'games', name: 'Games', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><rect x="4" y="12" width="56" height="38" rx="8" fill="#3a3a5a" stroke="#5a5a8a" stroke-width="2.5"/><circle cx="20" cy="30" r="7" fill="#e85d75"/></svg>', isSystem: true },
+        { id: 'browser', name: 'Browser', svg: '<svg class="icon-svg" viewBox="0 0 64 64"><circle cx="32" cy="32" r="27" fill="#5b9bd5" stroke="#3a7ab5" stroke-width="3"/></svg>', isSystem: true }
+    ];
+
+    function getDefaultFolderSvg() {
+        return '<svg class="icon-svg" viewBox="0 0 64 64"><path d="M8 12 L20 12 L24 8 L40 8 L40 40 L8 40 Z" fill="#f5c842" stroke="#d4a820" stroke-width="2.5"/></svg>';
+    }
+
+    // Load / Save desktop state
+    function loadDesktopState() {
+        const saved = localStorage.getItem('superSoft3_icons');
+        let icons;
+        if (saved) {
+            try {
+                icons = JSON.parse(saved);
+            } catch(e) { icons = null; }
+        }
+        if (!icons || !Array.isArray(icons) || icons.length === 0) {
+            icons = defaultIcons.map(i => ({...i}));
+        }
+        // Ensure all system icons exist
+        defaultIcons.forEach(def => {
+            if (!icons.find(i => i.id === def.id)) {
+                icons.push({...def});
+            }
+        });
+        renderIcons(icons);
+        // Background
+        const bg = localStorage.getItem('superSoft3_bg');
+        if (bg) desktop.style.background = bg;
+        else desktop.style.background = 'radial-gradient(circle at 30% 20%, #1f5870, #0a2a3a)';
+    }
+
+    function saveDesktopState() {
+        const icons = [];
+        document.querySelectorAll('#desktopIcons .desktop-icon').forEach(el => {
+            const id = el.dataset.app;
+            const name = el.querySelector('.icon-label').textContent;
+            const isSystem = defaultIcons.some(d => d.id === id);
+            icons.push({ id, name, isSystem });
+        });
+        localStorage.setItem('superSoft3_icons', JSON.stringify(icons));
+        localStorage.setItem('superSoft3_bg', desktop.style.background);
+    }
+
+    function renderIcons(icons) {
+        desktopIcons.innerHTML = '';
+        icons.forEach(icon => {
+            const el = document.createElement('div');
+            el.className = 'desktop-icon';
+            el.setAttribute('data-app', icon.id);
+            const svg = defaultIcons.find(d => d.id === icon.id)?.svg || getDefaultFolderSvg();
+            el.innerHTML = svg + `<span class="icon-label">${icon.name}</span>`;
+            el.addEventListener('dblclick', () => {
+                if (icon.id === 'thispc') openWindow('thispc');
+                else if (icon.id === 'documents') openWindow('documents');
+                else if (icon.id === 'recyclebin') openWindow('recyclebin');
+                else if (icon.id === 'games') openWindow('games');
+                else if (icon.id === 'browser') openWindow('browser');
+                else alert('Folder opened (simulation)');
+            });
+            el.addEventListener('click', () => selectIcon(el));
+            desktopIcons.appendChild(el);
+        });
+    }
+
+    function createNewFolder() {
+        const id = 'newfolder_' + Date.now();
+        const name = 'New Folder';
+        const el = document.createElement('div');
+        el.className = 'desktop-icon';
+        el.setAttribute('data-app', id);
+        el.innerHTML = getDefaultFolderSvg() + `<span class="icon-label">${name}</span>`;
+        el.addEventListener('dblclick', () => alert('Folder opened (simulation)'));
+        el.addEventListener('click', () => selectIcon(el));
+        desktopIcons.appendChild(el);
+        saveDesktopState();
+    }
+
+    function renameIcon(iconEl) {
+        const label = iconEl.querySelector('.icon-label');
+        const newName = prompt('Rename to:', label.textContent);
+        if (newName && newName.trim()) {
+            label.textContent = newName.trim();
+            saveDesktopState();
+        }
+    }
+
+    function deleteIcon(iconEl) {
+        const id = iconEl.dataset.app;
+        if (defaultIcons.some(d => d.id === id)) {
+            alert("System icons cannot be deleted.");
+            return;
+        }
+        if (confirm(`Delete "${iconEl.querySelector('.icon-label').textContent}"?`)) {
+            if (selectedIcon === iconEl) selectedIcon = null;
+            iconEl.remove();
+            saveDesktopState();
+        }
+    }
+
+    // Boot sequence
+    function finishBoot() {
+        if(bootComplete) return;
+        bootComplete = true;
+        loadDesktopState();
+        bootScreen.classList.add('fading');
+        setTimeout(() => {
+            bootScreen.classList.add('hidden');
+            scheduleErrorPopup();
+            updateClock();
+            setInterval(updateClock, 30000);
+        }, 700);
+    }
+
+    let imageLoaded = false, bootTimeout;
+    const preloadImg = new Image();
+    preloadImg.onload = () => {
+        imageLoaded = true;
+        bootImage.src = preloadImg.src;
+        bootImage.style.display = 'block';
+        bootFallback.style.display = 'none';
+        clearTimeout(bootTimeout);
+        bootTimeout = setTimeout(finishBoot, 6000);
+    };
+    preloadImg.onerror = () => {
+        bootImage.style.display = 'none';
+        bootFallback.style.display = 'flex';
+        clearTimeout(bootTimeout);
+        bootTimeout = setTimeout(finishBoot, 3000);
+    };
+    preloadImg.src = bootImage.src;
+    bootTimeout = setTimeout(() => {
+        if(!imageLoaded){ bootImage.style.display='none'; bootFallback.style.display='flex'; finishBoot(); }
+    }, 8000);
+
+    function updateClock() { clockTime.textContent = new Date().toLocaleTimeString('en-US', { hour:'2-digit', minute:'2-digit' }); }
+
+    // Start menu & context menu
+    window.toggleStartMenu = () => startMenu.classList.toggle('open');
+    document.addEventListener('click', (e) => {
+        if(startMenu.classList.contains('open') && !startMenu.contains(e.target) && e.target.id!=='startBtn')
+            startMenu.classList.remove('open');
+    });
+
+    function hideContextMenu() { contextMenu.style.display = 'none'; }
+    function showContextMenu(x,y,items) {
+        contextMenu.innerHTML = '';
+        items.forEach(item => {
+            if(item==='separator') {
+                const sep = document.createElement('div'); sep.className='context-separator'; contextMenu.appendChild(sep);
+            } else {
+                const mi = document.createElement('div'); mi.className='context-menu-item';
+                mi.textContent = item.label;
+                mi.onclick = (e) => { e.stopPropagation(); item.action(); hideContextMenu(); };
+                contextMenu.appendChild(mi);
+            }
+        });
+        contextMenu.style.left = Math.min(x, window.innerWidth-180) + 'px';
+        contextMenu.style.top = Math.min(y, window.innerHeight-200) + 'px';
+        contextMenu.style.display = 'block';
+    }
+
+    desktop.addEventListener('contextmenu', e => {
+        e.preventDefault();
+        if(e.target.closest('.desktop-icon')) return;
+        showContextMenu(e.clientX, e.clientY, [
+            { label:'View', action:()=>alert('View options') },
+            { label:'Sort by', action:()=>alert('Sort options') },
+            'separator',
+            { label:'Refresh', action:()=>{ desktop.style.filter='brightness(1.2)'; setTimeout(()=>desktop.style.filter='',200); } },
+            { label:'New Folder', action:createNewFolder },
+            'separator',
+            { label:'Personalize', action:()=>{ const bgs=['#1f5870','#2c3e50','#3a6073']; desktop.style.background=`radial-gradient(circle at 30% 20%, ${bgs[Math.floor(Math.random()*bgs.length)]}, #0a2a3a)`; saveDesktopState(); } }
+        ]);
+    });
+
+    desktopIcons.addEventListener('contextmenu', e => {
+        const icon = e.target.closest('.desktop-icon');
+        if(!icon) return;
+        e.preventDefault(); e.stopPropagation();
+        selectIcon(icon);
+        const items = [
+            { label:'Open', action:()=>{ icon.dispatchEvent(new Event('dblclick')); } },
+            { label:'Rename', action:()=>renameIcon(icon) }
+        ];
+        if(!defaultIcons.some(d => d.id === icon.dataset.app)) items.push({ label:'Delete', action:()=>deleteIcon(icon) });
+        items.push('separator', { label:'Properties', action:()=>alert(`Properties for ${icon.querySelector('.icon-label').textContent}`) });
+        showContextMenu(e.clientX, e.clientY, items);
+    });
+
+    document.addEventListener('click', e => { if(!contextMenu.contains(e.target)) hideContextMenu(); });
+    window.addEventListener('resize', hideContextMenu);
+
+    window.selectIcon = function(el) {
+        if(selectedIcon) selectedIcon.classList.remove('selected');
+        el.classList.add('selected');
+        selectedIcon = el;
+    };
+    desktop.addEventListener('click', e => {
+        if(e.target===desktop) { if(selectedIcon) { selectedIcon.classList.remove('selected'); selectedIcon = null; } }
+    });
+
+    // Window management (with pointer events dragging)
+    function createWindowElement(id, title, width, height) {
+        const win = document.createElement('div');
+        win.className = 'window'; win.id = 'window-'+id;
+        win.style.width = width+'px'; win.style.height = height+'px';
+        win.style.zIndex = ++windowZIndex;
+        const left = Math.min(window.innerWidth-width-20, 30+Object.keys(openWindows).length*30);
+        const top = Math.min(window.innerHeight-120-height, 30+Object.keys(openWindows).length*30);
+        win.style.left = left+'px'; win.style.top = top+'px';
+        win.innerHTML = `
+            <div class="window-titlebar"><span class="win-title-text">${title}</span>
+                <div class="win-controls">
+                    <button class="win-btn" data-action="minimize" data-id="${id}">─</button>
+                    <button class="win-btn" data-action="maximize" data-id="${id}">☐</button>
+                    <button class="win-btn close-btn" data-action="close" data-id="${id}">✕</button>
+                </div>
+            </div>
+            <div class="window-body" id="window-body-${id}"></div>`;
+        windowsContainer.appendChild(win);
+
+        const titlebar = win.querySelector('.window-titlebar');
+        let dragging = false, startX, startY, startLeft, startTop;
+        titlebar.addEventListener('pointerdown', (e) => {
+            if(e.target.closest('.win-btn')) return;
+            if(openWindows[id]?.maximized) return;
+            dragging = true;
+            titlebar.setPointerCapture(e.pointerId);
+            startX = e.clientX; startY = e.clientY;
+            startLeft = win.offsetLeft; startTop = win.offsetTop;
+            win.style.cursor = 'grabbing';
+            e.preventDefault();
+        });
+        titlebar.addEventListener('pointermove', (e) => {
+            if(!dragging) return;
+            win.style.left = Math.min(windowsContainer.offsetWidth-100, Math.max(0, startLeft + e.clientX - startX)) + 'px';
+            win.style.top = Math.min(windowsContainer.offsetHeight-30, Math.max(0, startTop + e.clientY - startY)) + 'px';
+        });
+        titlebar.addEventListener('pointerup', (e) => { dragging = false; win.style.cursor = ''; titlebar.releasePointerCapture(e.pointerId); });
+        titlebar.addEventListener('pointercancel', (e) => { dragging = false; win.style.cursor = ''; titlebar.releasePointerCapture(e.pointerId); });
+
+        openWindows[id] = { element:win, title, minimized:false, maximized:false, taskbarBtn:null,
+            prevLeft:left, prevTop:top, prevWidth:width, prevHeight:height };
+        const btn = document.createElement('button'); btn.className = 'taskbar-window-btn active'; btn.textContent = title;
+        btn.addEventListener('click', () => {
+            if(openWindows[id].minimized) { restoreWindow(id); bringToFront(id); }
+            else if(openWindows[id].element.style.zIndex == windowZIndex) minimizeWindow(id);
+            else { bringToFront(id); restoreWindow(id); }
+        });
+        taskbarWindows.appendChild(btn);
+        openWindows[id].taskbarBtn = btn;
+        updateTaskbarButtons(id);
+        return win;
+    }
+
+    windowsContainer.addEventListener('click', (e) => {
+        const btn = e.target.closest('.win-btn');
+        if(!btn) return;
+        const {action, id} = btn.dataset;
+        if(action==='close') closeWindow(id);
+        else if(action==='minimize') minimizeWindow(id);
+        else if(action==='maximize') maximizeWindow(id);
+    });
+
+    function updateTaskbarButtons(activeId) {
+        Object.keys(openWindows).forEach(wid => {
+            openWindows[wid].taskbarBtn?.classList.toggle('active', wid===activeId && !openWindows[wid].minimized);
+        });
+    }
+    function bringToFront(id) { if(!openWindows[id]) return; openWindows[id].element.style.zIndex = ++windowZIndex; updateTaskbarButtons(id); }
+    function minimizeWindow(id) { const w = openWindows[id]; if(w) { w.element.style.display='none'; w.minimized=true; updateTaskbarButtons(id); } }
+    function restoreWindow(id) { const w = openWindows[id]; if(w) { w.element.style.display='flex'; w.minimized=false; updateTaskbarButtons(id); } }
+    function maximizeWindow(id) {
+        const w = openWindows[id]; if(!w) return;
+        if(w.maximized) {
+            w.element.classList.remove('maximized');
+            w.element.style.left = w.prevLeft+'px'; w.element.style.top = w.prevTop+'px';
+            w.element.style.width = w.prevWidth+'px'; w.element.style.height = w.prevHeight+'px';
+            w.maximized = false;
+        } else {
+            w.prevLeft = parseInt(w.element.style.left); w.prevTop = parseInt(w.element.style.top);
+            w.prevWidth = parseInt(w.element.style.width); w.prevHeight = parseInt(w.element.style.height);
+            w.element.classList.add('maximized'); w.maximized = true;
+        }
+    }
+    function closeWindow(id) {
+        const w = openWindows[id]; if(!w) return;
+        if(id==='snake' && snakeInterval) { clearInterval(snakeInterval); snakeInterval = null; }
+        w.element.style.transition = 'opacity 0.15s'; w.element.style.opacity = '0';
+        setTimeout(() => { w.taskbarBtn?.remove(); w.element.remove(); delete openWindows[id]; }, 150);
+    }
+
+    window.openWindow = function(app) {
+        if(openWindows[app]) { if(openWindows[app].minimized) restoreWindow(app); bringToFront(app); return; }
+        let title,w,h,bodyFn;
+        switch(app) {
+            case 'thispc': title='This PC'; w=700; h=420; bodyFn=()=>createFolderContent([{name:'Local Disk (C:)',icon:'drive'},{name:'Documents',icon:'folder',action:()=>openWindow('documents')}]); break;
+            case 'documents': title='Documents'; w=650; h=400; bodyFn=()=>createFolderContent([{name:'Report.docx',icon:'file'},{name:'Notes.txt',icon:'file',action:()=>openWindow('notepad')}]); break;
+            case 'recyclebin': title='Recycle Bin'; w=550; h=350; bodyFn=()=>{ const d=document.createElement('div'); d.style.cssText='display:flex;align-items:center;justify-content:center;flex-direction:column;height:100%;color:#888;'; d.innerHTML='<svg width="48" height="48"><rect x="14" y="28" width="36" height="26" rx="3" fill="#ddd"/></svg><span>Recycle Bin is empty.</span>'; return d; }; break;
+            case 'games': title='Games'; w=500; h=350; bodyFn=()=>createFolderContent([{name:'Snake',icon:'snake',action:()=>openWindow('snake')},{name:'Memory',icon:'memory',action:()=>openWindow('memory')}]); break;
+            case 'browser': title='SuperSoft Browser'; w=800; h=480; bodyFn=()=>{ const d=document.createElement('div'); d.style.cssText='display:flex;flex-direction:column;height:100%;'; d.innerHTML='<div style="background:#f0f0f0;padding:8px;"><input style="width:100%;padding:6px;" value="https://krisxxxllkrisipurvanov-cpu.github.io/Windows-Server-2026/" readonly></div><div style="flex:1;display:flex;align-items:center;justify-content:center;">Welcome</div>'; return d; }; break;
+            case 'notepad': title='Notepad'; w=500; h=380; bodyFn=()=>{ const ta=document.createElement('textarea'); ta.className='notepad-area'; ta.value='SuperSoft3 Notepad'; return ta; }; break;
+            case 'snake': title='Snake'; w=440; h=500; bodyFn=()=>createSnakeGame(); break;
+            case 'memory': title='Memory Match'; w=460; h=430; bodyFn=()=>createMemoryGame(); break;
+            case 'settings': title='Settings'; w=500; h=400; bodyFn=()=>createSettingsWindow(); break;
+            case 'paint': title='Paint'; w=700; h=500; bodyFn=()=>createPaintWindow(); break;
+        }
+        const win = createWindowElement(app,title,w,h);
+        document.getElementById('window-body-'+app).appendChild(bodyFn());
+    };
+
+    // Folder content helper
+    function createFolderContent(items) {
+        const c = document.createElement('div'); c.className='folder-content';
+        items.forEach(it=>{
+            const el = document.createElement('div'); el.className='folder-item';
+            let svg='';
+            if(it.icon==='drive') svg='<svg viewBox="0 0 48 48"><rect x="6" y="4" width="36" height="40" rx="3" fill="#d0d0d0"/></svg>';
+            else if(it.icon==='folder') svg='<svg viewBox="0 0 48 48"><path d="M8 12 L20 12 L24 8 L40 8 L40 40 L8 40 Z" fill="#f5c842"/></svg>';
+            else if(it.icon==='file') svg='<svg viewBox="0 0 48 48"><rect x="10" y="4" width="28" height="40" rx="2" fill="#fafafa"/></svg>';
+            else if(it.icon==='snake') svg='<svg viewBox="0 0 48 48"><rect x="4" y="8" width="40" height="32" rx="4" fill="#1a3a1a"/></svg>';
+            else if(it.icon==='memory') svg='<svg viewBox="0 0 48 48"><rect x="4" y="4" width="18" height="18" rx="2" fill="#e85d75"/><rect x="26" y="4" width="18" height="18" rx="2" fill="#5dade2"/></svg>';
+            el.innerHTML = svg + '<span>'+it.name+'</span>';
+            if(it.action) { el.style.cursor='pointer'; el.addEventListener('dblclick', it.action); }
+            c.appendChild(el);
+        });
+        return c;
+    }
+
+    function createSettingsWindow() {
+        const div = document.createElement('div'); div.className='settings-section';
+        div.innerHTML = `<h3>Personalization</h3><button id="changeBgBtn">Change Background</button><button id="resetBgBtn">Reset Background</button><h3>About</h3><p>SuperSoft3 v1.0</p>`;
+        div.querySelector('#changeBgBtn').onclick = () => { desktop.style.background = `radial-gradient(circle at 30% 20%, #${Math.floor(Math.random()*0xFFFFFF).toString(16)}, #0a2a3a)`; saveDesktopState(); };
+        div.querySelector('#resetBgBtn').onclick = () => { desktop.style.background = 'radial-gradient(circle at 30% 20%, #1f5870, #0a2a3a)'; saveDesktopState(); };
+        return div;
+    }
+
+    function createPaintWindow() {
+        const container = document.createElement('div'); container.style.display='flex'; container.style.flexDirection='column'; container.style.height='100%';
+        const toolbar = document.createElement('div'); toolbar.className='paint-toolbar';
+        const colorPicker = document.createElement('input'); colorPicker.type='color'; colorPicker.value='#000000';
+        const clearBtn = document.createElement('button'); clearBtn.textContent='Clear'; toolbar.appendChild(colorPicker); toolbar.appendChild(clearBtn);
+        const canvas = document.createElement('canvas'); canvas.className='paint-canvas'; canvas.width=680; canvas.height=400;
+        const ctx = canvas.getContext('2d'); ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height);
+        let painting=false;
+        function startPos(e){ painting=true; draw(e); }
+        function endPos(){ painting=false; ctx.beginPath(); }
+        function draw(e){
+            if(!painting) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = (e.clientX-rect.left)*(canvas.width/rect.width);
+            const y = (e.clientY-rect.top)*(canvas.height/rect.height);
+            ctx.lineWidth=4; ctx.lineCap='round'; ctx.strokeStyle=colorPicker.value;
+            ctx.lineTo(x,y); ctx.stroke(); ctx.beginPath(); ctx.moveTo(x,y);
+        }
+        canvas.addEventListener('pointerdown',startPos); canvas.addEventListener('pointerup',endPos);
+        canvas.addEventListener('pointerleave',endPos); canvas.addEventListener('pointermove',draw);
+        clearBtn.addEventListener('click',()=>{ ctx.clearRect(0,0,canvas.width,canvas.height); ctx.fillStyle='#fff'; ctx.fillRect(0,0,canvas.width,canvas.height); });
+        container.appendChild(toolbar); container.appendChild(canvas);
+        return container;
+    }
+
+    function createSnakeGame() {
+        const container = document.createElement('div'); container.className='snake-container';
+        const canvas = document.createElement('canvas'); canvas.width=400; canvas.height=400;
+        const ctx = canvas.getContext('2d'); const scoreDiv = document.createElement('div'); scoreDiv.style.color='#a0d4ff';
+        container.appendChild(scoreDiv); container.appendChild(canvas);
+        let snake=[{x:10,y:10}], dir={x:1,y:0}, food, score=0, high=localStorage.getItem('ss3_snake_high')||0, gameOver=false, speed=100;
+        function spawnFood(){ while(true){ const f={x:Math.floor(Math.random()*20),y:Math.floor(Math.random()*20)}; if(!snake.some(s=>s.x===f.x&&s.y===f.y)) return f; } }
+        food=spawnFood();
+        function draw(){ ctx.fillStyle='#0d0d1a'; ctx.fillRect(0,0,400,400); ctx.fillStyle='#ff4444'; ctx.beginPath(); ctx.arc(food.x*20+10,food.y*20+10,8,0,Math.PI*2); ctx.fill(); snake.forEach((s,i)=>{ ctx.fillStyle=i===0?'#5eff5e':'#3abf3a'; ctx.fillRect(s.x*20+2,s.y*20+2,16,16); }); if(gameOver){ ctx.fillStyle='rgba(0,0,0,0.7)'; ctx.fillRect(0,180,400,40); ctx.fillStyle='#fff'; ctx.font='18px Segoe UI'; ctx.textAlign='center'; ctx.fillText('Game Over! Press Space',200,208); } }
+        function update(){ if(gameOver)return; const head={x:snake[0].x+dir.x,y:snake[0].y+dir.y}; if(head.x<0||head.x>=20||head.y<0||head.y>=20||snake.some(s=>s.x===head.x&&s.y===head.y)){ gameOver=true; if(score>high){high=score; localStorage.setItem('ss3_snake_high',high);} draw(); return; } snake.unshift(head); if(head.x===food.x&&head.y===food.y){ score+=10; food=spawnFood(); if(speed>50)speed-=2; resetInterval(); } else snake.pop(); scoreDiv.textContent=`Score: ${score} | High: ${high}`; draw(); }
+        function resetInterval(){ if(snakeInterval)clearInterval(snakeInterval); snakeInterval=setInterval(update,speed); }
+        resetInterval();
+        document.addEventListener('keydown', function snakeKey(e){
+            if(!openWindows['snake']||openWindows['snake'].minimized) return;
+            if(e.key===' '&&gameOver){ e.preventDefault(); restartSnake(); return; }
+            switch(e.key.toLowerCase()){
+                case 'arrowup': if(dir.y!==1)dir={x:0,y:-1}; e.preventDefault(); break;
+                case 'arrowdown': if(dir.y!==-1)dir={x:0,y:1}; e.preventDefault(); break;
+                case 'arrowleft': if(dir.x!==1)dir={x:-1,y:0}; e.preventDefault(); break;
+                case 'arrowright': if(dir.x!==-1)dir={x:1,y:0}; e.preventDefault(); break;
+            }
+        });
+        function restartSnake(){ clearInterval(snakeInterval); snake=[{x:10,y:10}]; dir={x:1,y:0}; food=spawnFood(); score=0; gameOver=false; speed=100; scoreDiv.textContent=`Score: 0 | High: ${high}`; resetInterval(); draw(); }
+        draw(); return container;
+    }
+
+    function createMemoryGame() {
+        const container = document.createElement('div'); container.className='memory-container';
+        const info = document.createElement('div'); const grid = document.createElement('div'); grid.className='memory-grid';
+        const restartBtn = document.createElement('button'); restartBtn.textContent='Restart';
+        container.append(info, grid, restartBtn);
+        const symbols=['●','■','▲','★','♦','♥'], colors=['#e85d75','#5dade2','#f5c842','#58d68d','#af7ac5','#f0a050'];
+        let cards=[], flipped=[], matched=0, clicks=0, locked=false;
+        function init(){ cards=[]; const deck=symbols.flatMap((s,i)=>[{sym:s,color:colors[i],id:i},{sym:s,color:colors[i],id:i}]); for(let i=deck.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[deck[i],deck[j]]=[deck[j],deck[i]];} cards=deck.map((c,i)=>({...c,uid:i,flipped:false,matched:false})); matched=0; clicks=0; flipped=[]; locked=false; info.textContent='Matches: 0/6 | Clicks: 0'; render(); }
+        function render(){ grid.innerHTML=''; cards.forEach(c=>{ const card=document.createElement('div'); card.className='memory-card'; if(c.flipped||c.matched){card.classList.add('flipped'); card.textContent=c.sym; card.style.color=c.color;} if(c.matched)card.classList.add('matched'); card.addEventListener('click',()=>flip(c.uid)); grid.appendChild(card); }); }
+        function flip(uid){ if(locked||flipped.length>=2)return; const card=cards.find(c=>c.uid===uid); if(!card||card.flipped||card.matched)return; card.flipped=true; flipped.push(card); clicks++; info.textContent=`Matches: ${matched}/6 | Clicks: ${clicks}`; render(); if(flipped.length===2){ locked=true; const[a,b]=flipped; if(a.id===b.id){ setTimeout(()=>{a.matched=b.matched=true; matched++; flipped=[]; locked=false; render(); if(matched===6)info.textContent=`Done in ${clicks} clicks!`; },300); }else{ setTimeout(()=>{a.flipped=b.flipped=false; flipped=[]; locked=false; render(); },700); } } }
+        restartBtn.addEventListener('click',init); init(); return container;
+    }
+
+    function scheduleErrorPopup() { if(!bootComplete||updateActive)return; if(errorTimer)clearTimeout(errorTimer); errorTimer=setTimeout(showErrorPopup, 40000+Math.random()*80000); }
+    function showErrorPopup() { if(errorVisible||updateActive){scheduleErrorPopup(); return;} errorVisible=true; errorOverlay.classList.add('show'); }
+    window.dismissError = () => { errorOverlay.classList.remove('show'); errorVisible=false; scheduleErrorPopup(); };
+    window.startUpdate = () => { errorOverlay.classList.remove('show'); errorVisible=false; if(errorTimer)clearTimeout(errorTimer); updateActive=true; updateOverlay.classList.add('show'); updateProgressFill.style.width='0%'; updatePercent.textContent='0%'; const duration=10000+Math.random()*10000; const start=Date.now(); function tick(){ const prog=Math.min(100,Math.round(((Date.now()-start)/duration)*100)); updateProgressFill.style.width=prog+'%'; updatePercent.textContent=prog+'%'; if(prog<100) requestAnimationFrame(()=>setTimeout(tick,200)); else setTimeout(()=>{ window.location.href='https://krisxxxllkrisipurvanov-cpu.github.io/Windows-Server-2026/'; },500); } tick(); };
+    errorOverlay.addEventListener('click', e => { if(e.target===errorOverlay) dismissError(); });
+})();
+</script>
+</body>
+</html>
